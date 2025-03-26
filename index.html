@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File to GeoJSON Converter</title>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.6.0/dist/jszip.min.js"></script>
+    <!-- togeojson (用于解析 KML 文件) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+
+    <!-- shapefile (用于解析 SHP 文件) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/shpjs/6.1.0/shp.min.js"></script>
+
+    <!-- dxf-parser (用于解析 DXF 文件) -->
+    <script src="https://cdn.jsdelivr.net/npm/dxf-parser@0.4.2/dxf-parser.min.js"></script>
+  </head>
+  <body>
+    <h1>File to GeoJSON Converter</h1>
+    <input type="file" id="fileInput" />
+    <pre id="output"></pre>
+
+    <script>
+      // 读取文件并根据扩展名判断格式进行解析
+      function readFile(file) {
+        const reader = new FileReader();
+
+        reader.onload = function (event) {
+          const fileContent = event.target.result;
+          const fileExtension = file.name.split(".").pop().toLowerCase();
+          let geojson;
+          switch (fileExtension) {
+            case "json":
+            case "geojson":
+              geojson = JSON.parse(fileContent);
+              displayGeoJSON(geojson);
+              break;
+
+            case "kml":
+              const kml = new DOMParser().parseFromString(
+                fileContent,
+                "text/xml"
+              );
+              geojson = toGeoJSON.kml(kml);
+              displayGeoJSON(geojson);
+              break;
+
+            case "kmz":
+              // 处理 KMZ 文件（压缩的 KML）
+              JSZip.loadAsync(fileContent).then(function (zip) {
+                const kmlFile = zip.file(/\.wpml$/)[0];
+                if (kmlFile) {
+                  kmlFile.async("string").then(function (kmlContent) {
+                    const kml = new DOMParser().parseFromString(
+                      kmlContent,
+                      "text/xml"
+                    );
+                    geojson = toGeoJSON.kml(kml);
+                    displayGeoJSON(geojson);
+                  });
+                }
+              });
+              break;
+
+            case "shp":
+              // 解析 SHP 文件（需要 SHP 和 SHX 文件）
+              const shpFile = file;
+              const shxFile = file.name.replace(".shp", ".shx");
+              shapefile
+                .open(shpFile, shxFile)
+                .then(function (source) {
+                  source.read().then(function (result) {
+                    geojson = result.value;
+                    displayGeoJSON(geojson);
+                  });
+                })
+                .catch(function (error) {
+                  console.error("Error reading SHP file:", error);
+                });
+              break;
+
+            case "dxf":
+              const parser = new DxfParser();
+              try {
+                const dxfData = parser.parse(fileContent);
+                geojson = dxfToGeoJSON(dxfData); // 将 DXF 转为 GeoJSON
+                displayGeoJSON(geojson);
+              } catch (error) {
+                console.error("Error parsing DXF file:", error);
+              }
+              break;
+
+            default:
+              console.error("Unsupported file format:", fileExtension);
+              break;
+          }
+        };
+
+        reader.readAsArrayBuffer(file); // 读取文件为二进制数据
+      }
+
+      // 将 DXF 数据转换为 GeoJSON（简化版）
+      function dxfToGeoJSON(dxfData) {
+        const geojson = {
+          type: "FeatureCollection",
+          features: [],
+        };
+
+        // 遍历 DXF 数据中的实体并转换为 GeoJSON 格式
+        dxfData.entities.forEach((entity) => {
+          if (entity.type === "LINE") {
+            geojson.features.push({
+              type: "Feature",
+              geometry: {
+                type: "LineString",
+                coordinates: [
+                  [entity.vertices[0].x, entity.vertices[0].y],
+                  [entity.vertices[1].x, entity.vertices[1].y],
+                ],
+              },
+              properties: {},
+            });
+          }
+          // 可以根据其他实体类型进一步扩展（例如 CIRCLE, POLYLINE, etc.）
+        });
+
+        return geojson;
+      }
+
+      // 显示 GeoJSON 输出
+      function displayGeoJSON(geojson) {
+        const outputElement = document.getElementById("output");
+        outputElement.textContent = JSON.stringify(geojson, null, 2); // 格式化显示
+        console.log("GeoJSON:", geojson); // 也可以在控制台输出
+      }
+
+      // 示例：使用 HTML 输入上传文件
+      document
+        .getElementById("fileInput")
+        .addEventListener("change", function (event) {
+          const file = event.target.files[0];
+          if (file) {
+            readFile(file);
+          }
+        });
+    </script>
+  </body>
+</html>
